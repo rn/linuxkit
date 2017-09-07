@@ -1,0 +1,57 @@
+From 333302b0cc198979bea9fae93e511442355bc416 Mon Sep 17 00:00:00 2001
+From: Rolf Neugebauer <rolf.neugebauer@docker.com>
+Date: Thu, 7 Sep 2017 17:11:41 +0100
+Subject: [PATCH 22/22] Revert "ext4: return to starting transaction in
+ ext4_dax_huge_fault()"
+
+In bisecting this caused LCOW to fail. Testing that this is the case in 4.11.12
+
+This reverts commit 5a3651b4a92cbc5230d67d2ce87fb3f7373c7665.
+---
+ fs/ext4/file.c | 21 ++++-----------------
+ 1 file changed, 4 insertions(+), 17 deletions(-)
+
+diff --git a/fs/ext4/file.c b/fs/ext4/file.c
+index bbea2dccd584..68b297c04908 100644
+--- a/fs/ext4/file.c
++++ b/fs/ext4/file.c
+@@ -257,7 +257,6 @@ static int ext4_dax_huge_fault(struct vm_fault *vmf,
+ 		enum page_entry_size pe_size)
+ {
+ 	int result;
+-	handle_t *handle = NULL;
+ 	struct inode *inode = file_inode(vmf->vma->vm_file);
+ 	struct super_block *sb = inode->i_sb;
+ 	bool write = vmf->flags & FAULT_FLAG_WRITE;
+@@ -265,24 +264,12 @@ static int ext4_dax_huge_fault(struct vm_fault *vmf,
+ 	if (write) {
+ 		sb_start_pagefault(sb);
+ 		file_update_time(vmf->vma->vm_file);
+-		down_read(&EXT4_I(inode)->i_mmap_sem);
+-		handle = ext4_journal_start_sb(sb, EXT4_HT_WRITE_PAGE,
+-					       EXT4_DATA_TRANS_BLOCKS(sb));
+-	} else {
+-		down_read(&EXT4_I(inode)->i_mmap_sem);
+ 	}
+-	if (!IS_ERR(handle))
+-		result = dax_iomap_fault(vmf, pe_size, &ext4_iomap_ops);
+-	else
+-		result = VM_FAULT_SIGBUS;
+-	if (write) {
+-		if (!IS_ERR(handle))
+-			ext4_journal_stop(handle);
+-		up_read(&EXT4_I(inode)->i_mmap_sem);
++	down_read(&EXT4_I(inode)->i_mmap_sem);
++	result = dax_iomap_fault(vmf, pe_size, &ext4_iomap_ops);
++	up_read(&EXT4_I(inode)->i_mmap_sem);
++	if (write)
+ 		sb_end_pagefault(sb);
+-	} else {
+-		up_read(&EXT4_I(inode)->i_mmap_sem);
+-	}
+ 
+ 	return result;
+ }
+-- 
+2.14.1
+
