@@ -1,5 +1,5 @@
 kernel:
-  image: rneugeba/kernel:4.11.1-commit-1567c1706332
+  image: rneugeba/kernel:4.11.1-commit-ed4d26a1e45b
   cmdline: "console=ttyS0"
   tar: none
 init:
