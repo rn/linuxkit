@@ -86,8 +86,7 @@ RUN case $(uname -m) in \
     fi && \
     rm /linux/kernel_config* && \
     make defconfig && \
-    make oldconfig && \
-    if [ -z "${EXTRA}" ]; then diff .config ${KERNEL_DEF_CONF}; fi
+    make oldconfig
 
 RUN mkdir /out
 
