@@ -1,5 +1,5 @@
 kernel:
-  image: linuxkit/kernel:4.11.12-f3fa7c62a28c70ada944121a8579290ad5b8bfb2
+  image: rneugeba/kernel:4.11.1-commit-1567c1706332
   cmdline: "console=ttyS0"
   tar: none
 init:
