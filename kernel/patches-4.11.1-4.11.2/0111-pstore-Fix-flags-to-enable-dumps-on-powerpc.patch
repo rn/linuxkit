@@ -1,0 +1,38 @@
+From f25c78c879fac44e549918f3b7201c757201cc9d Mon Sep 17 00:00:00 2001
+From: Ankit Kumar <ankit@linux.vnet.ibm.com>
+Date: Thu, 27 Apr 2017 17:03:13 +0530
+Subject: [PATCH 111/114] pstore: Fix flags to enable dumps on powerpc
+
+commit 041939c1ec54208b42f5cd819209173d52a29d34 upstream.
+
+After commit c950fd6f201a kernel registers pstore write based on flag set.
+Pstore write for powerpc is broken as flags(PSTORE_FLAGS_DMESG) is not set for
+powerpc architecture. On panic, kernel doesn't write message to
+/fs/pstore/dmesg*(Entry doesn't gets created at all).
+
+This patch enables pstore write for powerpc architecture by setting
+PSTORE_FLAGS_DMESG flag.
+
+Fixes: c950fd6f201a ("pstore: Split pstore fragile flags")
+Signed-off-by: Ankit Kumar <ankit@linux.vnet.ibm.com>
+Signed-off-by: Kees Cook <keescook@chromium.org>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ arch/powerpc/kernel/nvram_64.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/powerpc/kernel/nvram_64.c b/arch/powerpc/kernel/nvram_64.c
+index d5e2b8309939..021db31b40ba 100644
+--- a/arch/powerpc/kernel/nvram_64.c
++++ b/arch/powerpc/kernel/nvram_64.c
+@@ -561,6 +561,7 @@ static ssize_t nvram_pstore_read(u64 *id, enum pstore_type_id *type,
+ static struct pstore_info nvram_pstore_info = {
+ 	.owner = THIS_MODULE,
+ 	.name = "nvram",
++	.flags = PSTORE_FLAGS_DMESG,
+ 	.open = nvram_pstore_open,
+ 	.read = nvram_pstore_read,
+ 	.write = nvram_pstore_write,
+-- 
+2.14.1
+

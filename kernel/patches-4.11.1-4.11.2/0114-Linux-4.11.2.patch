@@ -1,0 +1,24 @@
+From 02d86837352952eb7ca4e9370fef944a16f69206 Mon Sep 17 00:00:00 2001
+From: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+Date: Sat, 20 May 2017 14:50:04 +0200
+Subject: [PATCH 114/114] Linux 4.11.2
+
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 9dc2aec1c2e5..d7b64830a7b7 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,6 +1,6 @@
+ VERSION = 4
+ PATCHLEVEL = 11
+-SUBLEVEL = 1
++SUBLEVEL = 2
+ EXTRAVERSION =
+ NAME = Fearless Coyote
+ 
+-- 
+2.14.1
+
