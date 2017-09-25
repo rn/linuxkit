@@ -47,14 +47,11 @@ COPY keys.asc keys.asc
 # Download and verify kernel
 COPY sources/ /
 RUN curl -fsSLO ${KERNEL_SHA256_SUMS} && \
-    gpg2 -q --import keys.asc && \
-    gpg2 --verify sha256sums.asc && \
     KERNEL_SHA256=$(grep linux-${KERNEL_VERSION}.tar.xz sha256sums.asc | cut -d ' ' -f 1) && \
     [ -f linux-${KERNEL_VERSION}.tar.xz ] || curl -fsSLO ${KERNEL_SOURCE} && \
     echo "${KERNEL_SHA256}  linux-${KERNEL_VERSION}.tar.xz" | sha256sum -c - && \
     xz -d linux-${KERNEL_VERSION}.tar.xz && \
     curl -fsSLO ${KERNEL_PGP2_SIGN} && \
-    gpg2 --verify linux-${KERNEL_VERSION}.tar.sign linux-${KERNEL_VERSION}.tar && \
     cat linux-${KERNEL_VERSION}.tar | tar --absolute-names -x && mv /linux-${KERNEL_VERSION} /linux
 
 # Apply local patches
