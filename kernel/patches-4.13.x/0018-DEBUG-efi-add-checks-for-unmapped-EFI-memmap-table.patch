@@ -1,0 +1,373 @@
+From 67831bb9a5421541585643f644e7f36038a6ae18 Mon Sep 17 00:00:00 2001
+From: Rolf Neugebauer <rolf.neugebauer@docker.com>
+Date: Mon, 25 Sep 2017 14:43:41 +0100
+Subject: [PATCH 18/18] DEBUG: efi: add checks for unmapped EFI memmap table
+
+Signed-off-by: Rolf Neugebauer <rolf.neugebauer@docker.com>
+---
+ arch/x86/boot/compressed/eboot.c | 52 ++++++++++++++++++++++++++++++++++++++++
+ arch/x86/kernel/head64.c         | 34 ++++++++++++++++++++++++++
+ arch/x86/kernel/setup.c          | 35 +++++++++++++++++++++++++++
+ arch/x86/platform/efi/efi.c      | 26 ++++++++++++++++++++
+ init/main.c                      | 25 +++++++++++++++++++
+ 5 files changed, 172 insertions(+)
+
+diff --git a/arch/x86/boot/compressed/eboot.c b/arch/x86/boot/compressed/eboot.c
+index c3e869eaef0c..aea8006259a4 100644
+--- a/arch/x86/boot/compressed/eboot.c
++++ b/arch/x86/boot/compressed/eboot.c
+@@ -18,6 +18,23 @@
+ #include "../string.h"
+ #include "eboot.h"
+ 
++/* XXX We us the _pad2[4] field in struct boot_params to pass some
++ * debug info from the efi-stub to the kernel proper.
++ * - _pad2[0] contains some flags
++ * - _pad2[2] contains the number of memmap descriptors added
++ * - _pad2[3] contains the number of e820 descriptors added
++ */
++
++#define XXX_FLAG_EFI_MAIN         (1 << 0) /* efi_main() called */
++#define XXX_FLAG_SETUP_E820       (1 << 1) /* setup_e820() called */
++#define XXX_FLAG_ADD_E820EXT      (1 << 2) /* add_e820ext() called */
++#define XXX_FLAG_EXIT_BOOT_FIRST  (1 << 3) /* exit_boot_func() called first time*/
++#define XXX_FLAG_EXIT_BOOT_SECOND (1 << 4) /* exit_boot_func() called a second time */
++#define XXX_FLAG_RELOC_KERNEL     (1 << 5) /* Kernel got relocated */
++#define XXX_FLAG_MD_ZERO          (1 << 6) /* 1st memmap zero */
++#define XXX_FLAG_MD_ZERO_END      (1 << 7) /* 1st memmap still zero before exit */
++
++
+ static efi_system_table_t *sys_table;
+ 
+ static struct efi_config *efi_early;
+@@ -730,6 +747,8 @@ static void add_e820ext(struct boot_params *params,
+ 	efi_status_t status;
+ 	unsigned long size;
+ 
++	params->_pad2[0] |= XXX_FLAG_ADD_E820EXT;
++
+ 	e820ext->type = SETUP_E820_EXT;
+ 	e820ext->len = nr_entries * sizeof(struct boot_e820_entry);
+ 	e820ext->next = 0;
+@@ -758,11 +777,23 @@ static efi_status_t setup_e820(struct boot_params *params,
+ 	nr_entries = 0;
+ 	nr_desc = efi->efi_memmap_size / efi->efi_memdesc_size;
+ 
++	params->_pad2[0] |= XXX_FLAG_SETUP_E820;
++
++	{
++		efi_memory_desc_t *md = (efi_memory_desc_t *)(unsigned long)efi->efi_memmap;
++		unsigned long long start = md->phys_addr;
++                unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++                if (start == 0 && size == 0)
++			params->_pad2[0] |= XXX_FLAG_MD_ZERO;
++	}
++
+ 	for (i = 0; i < nr_desc; i++) {
+ 		efi_memory_desc_t *d;
+ 		unsigned int e820_type = 0;
+ 		unsigned long m = efi->efi_memmap;
+ 
++		params->_pad2[2] += 1;
++
+ #ifdef CONFIG_X86_64
+ 		m |= (u64)efi->efi_memmap_hi << 32;
+ #endif
+@@ -829,6 +860,8 @@ static efi_status_t setup_e820(struct boot_params *params,
+ 		entry->type = e820_type;
+ 		prev = entry++;
+ 		nr_entries++;
++
++		params->_pad2[3] += 1;
+ 	}
+ 
+ 	if (nr_entries > ARRAY_SIZE(params->e820_table)) {
+@@ -884,6 +917,11 @@ static efi_status_t exit_boot_func(efi_system_table_t *sys_table_arg,
+ 	efi_status_t status;
+ 	struct exit_boot_struct *p = priv;
+ 
++	if (first)
++		p->boot_params->_pad2[0] |= XXX_FLAG_EXIT_BOOT_FIRST;
++	else
++		p->boot_params->_pad2[0] |= XXX_FLAG_EXIT_BOOT_SECOND;
++
+ 	if (first) {
+ 		nr_desc = *map->buff_size / *map->desc_size;
+ 		if (nr_desc > ARRAY_SIZE(p->boot_params->e820_table)) {
+@@ -973,6 +1011,8 @@ struct boot_params *efi_main(struct efi_config *c,
+ 	efi_system_table_t *_table;
+ 	bool is64;
+ 
++	boot_params->_pad2[0] |= XXX_FLAG_EFI_MAIN;
++
+ 	efi_early = c;
+ 
+ 	_table = (efi_system_table_t *)(unsigned long)efi_early->table;
+@@ -1023,6 +1063,9 @@ struct boot_params *efi_main(struct efi_config *c,
+ 	 * address, relocate it.
+ 	 */
+ 	if (hdr->pref_address != hdr->code32_start) {
++
++		boot_params->_pad2[0] |= XXX_FLAG_RELOC_KERNEL;
++
+ 		unsigned long bzimage_addr = hdr->code32_start;
+ 		status = efi_relocate_kernel(sys_table, &bzimage_addr,
+ 					     hdr->init_size, hdr->init_size,
+@@ -1128,6 +1171,15 @@ struct boot_params *efi_main(struct efi_config *c,
+ 	asm volatile("cli");
+ 	asm volatile ("lgdt %0" : : "m" (*gdt));
+ 
++	{
++		struct efi_info *efi = &boot_params->efi_info;
++		efi_memory_desc_t *md =	(efi_memory_desc_t *)(unsigned long)efi->efi_memmap;
++		unsigned long long start = md->phys_addr;
++                unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++                if (start == 0 && size == 0)
++			boot_params->_pad2[0] |= XXX_FLAG_MD_ZERO_END;
++	}
++
+ 	return boot_params;
+ fail:
+ 	efi_printk(sys_table, "efi_main() failed!\n");
+diff --git a/arch/x86/kernel/head64.c b/arch/x86/kernel/head64.c
+index 9ba79543d9ee..2fea46971e7d 100644
+--- a/arch/x86/kernel/head64.c
++++ b/arch/x86/kernel/head64.c
+@@ -253,6 +253,10 @@ static void __init copy_bootdata(char *real_mode_data)
+ 	}
+ }
+ 
++/* XXX global to stash some state during the boot process */
++extern u32 xxx_efi_debug;
++#include <linux/efi.h>
++
+ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
+ {
+ 	int i;
+@@ -288,11 +292,31 @@ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
+ 
+ 	copy_bootdata(__va(real_mode_data));
+ 
++        /* XXX check the first EFI memap descriptor using the direct
++         * map. Assumes the map is in the low 4G, which it is. */
++        {
++                efi_memory_desc_t *md = __va(boot_params.efi_info.efi_memmap);
++                unsigned long long start = md->phys_addr;
++                unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++                if (start != 0 || size != 0)
++                        xxx_efi_debug |= (1 << 0);
++        }
++
+ 	/*
+ 	 * Load microcode early on BSP.
+ 	 */
+ 	load_ucode_bsp();
+ 
++        /* XXX check the first EFI memap descriptor using the direct
++         * map. Assumes the map is in the low 4G, which it is. */
++        {
++                efi_memory_desc_t *md = __va(boot_params.efi_info.efi_memmap);
++                unsigned long long start = md->phys_addr;
++                unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++                if (start != 0 || size != 0)
++                        xxx_efi_debug |= (1 << 1);
++        }
++
+ 	/* set init_top_pgt kernel high mapping*/
+ 	init_top_pgt[511] = early_top_pgt[511];
+ 
+@@ -301,6 +325,16 @@ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
+ 
+ void __init x86_64_start_reservations(char *real_mode_data)
+ {
++        /* XXX check the first EFI memap descriptor using the direct
++         * map. Assumes the map is in the low 4G, which it is. */
++        {
++                efi_memory_desc_t *md = __va(boot_params.efi_info.efi_memmap);
++                unsigned long long start = md->phys_addr;
++                unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++                if (start != 0 || size != 0)
++                        xxx_efi_debug |= (1 << 2);
++        }
++
+ 	/* version is always not zero if it is copied */
+ 	if (!boot_params.hdr.version)
+ 		copy_bootdata(__va(real_mode_data));
+diff --git a/arch/x86/kernel/setup.c b/arch/x86/kernel/setup.c
+index 3486d0498800..d33f73fc0b5d 100644
+--- a/arch/x86/kernel/setup.c
++++ b/arch/x86/kernel/setup.c
+@@ -845,8 +845,21 @@ static void __init simple_udelay_calibration(void)
+  * Note: On x86_64, fixmaps are ready for use even before this is called.
+  */
+ 
++/* XXX global to stash some state during the boot process */
++extern u32 xxx_efi_debug;
++
+ void __init setup_arch(char **cmdline_p)
+ {
++	/* XXX check the first EFI memap descriptor using the direct
++	 * map. Assumes the map is in the low 4G, which it is. */
++	{
++		efi_memory_desc_t *md = __va(boot_params.efi_info.efi_memmap);
++		unsigned long long start = md->phys_addr;
++                unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++                if (start != 0 || size != 0)
++			xxx_efi_debug |= (1 << 24);
++	}
++
+ 	memblock_reserve(__pa_symbol(_text),
+ 			 (unsigned long)__bss_stop - (unsigned long)_text);
+ 
+@@ -884,6 +897,28 @@ void __init setup_arch(char **cmdline_p)
+ 	printk(KERN_INFO "Command line: %s\n", boot_command_line);
+ #endif
+ 
++	/* XXX Dump the pad2 data used by our modified efi-stub plus other info*/
++	pr_info("XXX: %s:%i: EFI stub state: %#02x %#02x %#02x %#02x\n",
++		__func__, __LINE__,
++		boot_params._pad2[0], boot_params._pad2[1],
++		boot_params._pad2[2], boot_params._pad2[3]);
++	pr_info("XXX: %s:%i: EFI early boot state: %#08x\n",
++		__func__, __LINE__, xxx_efi_debug);
++	printk("XXX: %s:%i: efi_info.memmap=%#08x:%#08x (%#04x)\n",
++	       __func__, __LINE__,
++	       boot_params.efi_info.efi_memmap_hi,
++	       boot_params.efi_info.efi_memmap,
++	       boot_params.efi_info.efi_memmap_size);
++	/* XXX dump the first descriptor using the direct map. Assumes
++	 * the map is in the low 4G, which it is. */
++	{
++		efi_memory_desc_t *md = __va(boot_params.efi_info.efi_memmap);
++		unsigned long long start = md->phys_addr;
++                unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++		printk("XXX: %s:%i: %p: %#016Lx %#016Lx\n", __func__,
++		       __LINE__, md, start, size);
++	}
++
+ 	/*
+ 	 * If we have OLPC OFW, we might end up relocating the fixmap due to
+ 	 * reserve_top(), so do this before touching the ioremap area.
+diff --git a/arch/x86/platform/efi/efi.c b/arch/x86/platform/efi/efi.c
+index f084d8718ac4..5e0e59462f37 100644
+--- a/arch/x86/platform/efi/efi.c
++++ b/arch/x86/platform/efi/efi.c
+@@ -206,6 +206,16 @@ int __init efi_memblock_x86_reserve_range(void)
+ 	     "Unexpected EFI_MEMORY_DESCRIPTOR version %ld",
+ 	     efi.memmap.desc_version);
+ 
++	{
++		/* XXX Debug: Check that the EFI memory map is valid, only check the first entry */
++		efi_memory_desc_t *md = efi.memmap.map;
++		unsigned long long start = md->phys_addr;
++		unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++		if (start == 0 && size == 0)
++			pr_info("XXX: %s:%i: %p: %#016Lx %#016Lx\n",
++				__func__, __LINE__, md, start, size);
++	}
++
+ 	memblock_reserve(pmap, efi.memmap.nr_map * efi.memmap.desc_size);
+ 
+ 	return 0;
+@@ -267,6 +277,20 @@ static void __init efi_clean_memmap(void)
+ 		in = (void *)in + efi.memmap.desc_size;
+ 	}
+ 
++	/* XXX When we crash, lots of error messages will have been printed by
++	 * efi_memmap_entry_valid() above, so dump the state here
++	 * before we modify it during efi_memmap_install() below. */
++	pr_info("XXX: efi_clean_memmap(): efi.flags=%#08lx\n", efi.flags);
++	pr_info("XXX: efi_clean_memmap(): efi.memmap.phys_map=%#016Lx\n", efi.memmap.phys_map);
++	pr_info("XXX: efi_clean_memmap(): efi.memmap.map=%p\n", efi.memmap.map);
++	pr_info("XXX: efi_clean_memmap(): efi.memmap.map_end=%p\n", efi.memmap.map_end);
++	pr_info("XXX: efi_clean_memmap(): efi.memmap.nr_map=%#x\n", efi.memmap.nr_map);
++	pr_info("XXX: efi_clean_memmap(): efi.memmap.desc_version=%#08lx\n", efi.memmap.desc_version);
++	pr_info("XXX: efi_clean_memmap(): efi.memmap.desc_size=%#08lx\n", efi.memmap.desc_size);
++	pr_info("XXX: efi_clean_memmap(): efi.memmap.late=%#x\n", efi.memmap.late);
++	pr_info("XXX: efi_clean_memmap(): efi.mem_attr_table=%#016Lx\n", efi.mem_attr_table);
++	pr_info("XXX: efi_clean_memmap(): &efi.memmap=%p\n", &efi.memmap);
++
+ 	if (n_removal > 0) {
+ 		u64 size = efi.memmap.nr_map - n_removal;
+ 
+@@ -533,6 +557,7 @@ void __init efi_init(void)
+ 	else {
+ 		if (efi_runtime_disabled() || efi_runtime_init()) {
+ 			efi_memmap_unmap();
++			pr_info("XXX: %s:%s:%i: efi_memmap_unmap()\n", __FILE__, __func__, __LINE__);
+ 			return;
+ 		}
+ 	}
+@@ -951,6 +976,7 @@ static void __init __efi_enter_virtual_mode(void)
+ 	 * firmware via SetVirtualAddressMap().
+ 	 */
+ 	efi_memmap_unmap();
++	pr_info("XXX: %s:%s:%i: efi_memmap_unmap()\n", __FILE__, __func__, __LINE__);
+ 
+ 	if (efi_memmap_init_late(pa, efi.memmap.desc_size * count)) {
+ 		pr_err("Failed to remap late EFI memory map\n");
+diff --git a/init/main.c b/init/main.c
+index 052481fbe363..c9ff039f1079 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -506,32 +506,57 @@ static void __init mm_init(void)
+ 	ioremap_huge_init();
+ }
+ 
++/* XXX During early boot we may not have printk, so use a global
++ * bitmap and set a bit if there is a valid entry in the EFI
++ * memmap. We check the first EFI memap descriptor using the direct
++ * map. Assumes the map is in the low 4G, which it is.  */
++u32 xxx_efi_debug;
++static inline xxx_efi_debug_set(int x)
++{
++	efi_memory_desc_t *md = __va(boot_params.efi_info.efi_memmap);
++	unsigned long long start = md->phys_addr;
++	unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
++	if (start != 0 || size != 0)
++		xxx_efi_debug |= (1 << x);
++}
++
+ asmlinkage __visible void __init start_kernel(void)
+ {
+ 	char *command_line;
+ 	char *after_dashes;
+ 
++	xxx_efi_debug_set(8);
++
+ 	set_task_stack_end_magic(&init_task);
++	xxx_efi_debug_set(9);
+ 	smp_setup_processor_id();
++	xxx_efi_debug_set(10);
+ 	debug_objects_early_init();
++	xxx_efi_debug_set(11);
+ 
+ 	/*
+ 	 * Set up the initial canary ASAP:
+ 	 */
+ 	add_latent_entropy();
++	xxx_efi_debug_set(12);
+ 	boot_init_stack_canary();
++	xxx_efi_debug_set(13);
+ 
+ 	cgroup_init_early();
++	xxx_efi_debug_set(14);
+ 
+ 	local_irq_disable();
+ 	early_boot_irqs_disabled = true;
++	xxx_efi_debug_set(15);
+ 
+ 	/*
+ 	 * Interrupts are still disabled. Do necessary setups, then
+ 	 * enable them.
+ 	 */
+ 	boot_cpu_init();
++	xxx_efi_debug_set(16);
+ 	page_address_init();
++	xxx_efi_debug_set(17);
+ 	pr_notice("%s", linux_banner);
+ 	setup_arch(&command_line);
+ 	mm_init_cpumask(&init_mm);
+-- 
+2.14.1
+

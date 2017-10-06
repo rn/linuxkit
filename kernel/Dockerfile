@@ -44,17 +44,10 @@ ENV WIREGUARD_URL=https://git.zx2c4.com/WireGuard/snapshot/WireGuard-${WIREGUARD
 # PGP keys: 589DA6B1 (greg@kroah.com) & 6092693E (autosigner@kernel.org) & 00411886 (torvalds@linux-foundation.org)
 COPY keys.asc keys.asc
 
-# Download and verify kernel
+# Download
 COPY sources/ /
-RUN curl -fsSLO ${KERNEL_SHA256_SUMS} && \
-    gpg2 -q --import keys.asc && \
-    gpg2 --verify sha256sums.asc && \
-    KERNEL_SHA256=$(grep linux-${KERNEL_VERSION}.tar.xz sha256sums.asc | cut -d ' ' -f 1) && \
-    [ -f linux-${KERNEL_VERSION}.tar.xz ] || curl -fsSLO ${KERNEL_SOURCE} && \
-    echo "${KERNEL_SHA256}  linux-${KERNEL_VERSION}.tar.xz" | sha256sum -c - && \
+RUN [ -f linux-${KERNEL_VERSION}.tar.xz ] || curl -fsSLO ${KERNEL_SOURCE} && \
     xz -d linux-${KERNEL_VERSION}.tar.xz && \
-    curl -fsSLO ${KERNEL_PGP2_SIGN} && \
-    gpg2 --verify linux-${KERNEL_VERSION}.tar.sign linux-${KERNEL_VERSION}.tar && \
     cat linux-${KERNEL_VERSION}.tar | tar --absolute-names -x && mv /linux-${KERNEL_VERSION} /linux
 
 # Apply local patches
@@ -104,15 +97,8 @@ RUN make -j "$(getconf _NPROCESSORS_ONLN)" KCFLAGS="-fno-pie" && \
     cp System.map /out && \
     ([ "${EXTRA}" = "-dbg" ] && cp vmlinux /out || true)
 
-# WireGuard
-RUN curl -sSL -o /wireguard.tar.xz "${WIREGUARD_URL}" && \
-    echo "${WIREGUARD_SHA256}  /wireguard.tar.xz" | sha256sum -c - && \
-    tar -C / --one-top-level=wireguard --strip-components=2 -xJf /wireguard.tar.xz "WireGuard-${WIREGUARD_VERSION}/src" && \
-    make -j "$(getconf _NPROCESSORS_ONLN)" M="/wireguard" modules
-
 # Modules
 RUN make INSTALL_MOD_PATH=/tmp/kernel-modules modules_install && \
-    make INSTALL_MOD_PATH=/tmp/kernel-modules M="/wireguard" modules_install && \
     ( DVER=$(basename $(find /tmp/kernel-modules/lib/modules/ -mindepth 1 -maxdepth 1)) && \
       cd /tmp/kernel-modules/lib/modules/$DVER && \
       rm build source && \
@@ -139,14 +125,6 @@ RUN DVER=$(basename $(find /tmp/kernel-modules/lib/modules/ -mindepth 1 -maxdept
     ( cd /tmp && tar cf /out/kernel-dev.tar usr/src )
 
 RUN printf "KERNEL_SOURCE=${KERNEL_SOURCE}\n" > /out/kernel-source-info
-
-# perf (Don't compile for 4.4.x, it's broken and tedious to fix)
-RUN if [ "${KERNEL_SERIES}" != "4.4.x" ]; then \
-       mkdir -p /build/perf && \
-       make -C tools/perf LDFLAGS=-static O=/build/perf && \
-       strip /build/perf/perf && \
-       cp /build/perf/perf /out; \
-     fi
 
 FROM scratch
 ENTRYPOINT []
