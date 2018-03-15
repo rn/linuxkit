@@ -1,7 +1,7 @@
 From 1a5e660a3c6b31b01442815e36581ae930db5b18 Mon Sep 17 00:00:00 2001
 From: Vitaly Kuznetsov <vkuznets@redhat.com>
 Date: Sun, 29 Oct 2017 12:21:13 -0700
-Subject: [PATCH 15/19] hyper-v: trace vmbus_negotiate_version()
+Subject: [PATCH 15/22] hyper-v: trace vmbus_negotiate_version()
 
 Add tracepoint to CHANNELMSG_INITIATE_CONTACT sender.
 

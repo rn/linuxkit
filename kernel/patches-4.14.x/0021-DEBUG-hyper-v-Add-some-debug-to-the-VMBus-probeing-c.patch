@@ -1,0 +1,39 @@
+From 891caf4a2f94736eea212ed63ba1102baf0d5f82 Mon Sep 17 00:00:00 2001
+From: Rolf Neugebauer <rolf.neugebauer@docker.com>
+Date: Mon, 19 Mar 2018 15:54:20 +0000
+Subject: [PATCH 21/22] DEBUG: hyper-v: Add some debug to the VMBus probeing
+ code
+
+Signed-off-by: Rolf Neugebauer <rolf.neugebauer@docker.com>
+---
+ drivers/hv/vmbus_drv.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/hv/vmbus_drv.c b/drivers/hv/vmbus_drv.c
+index 27d5efd696ad..31d47e812342 100644
+--- a/drivers/hv/vmbus_drv.c
++++ b/drivers/hv/vmbus_drv.c
+@@ -718,6 +718,10 @@ static int vmbus_probe(struct device *child_device)
+ 		       dev_name(child_device));
+ 		ret = -ENODEV;
+ 	}
++
++	pr_info("probed type:%pUl instance:%pUl\n",
++		dev->dev_type.b, dev->dev_instance.b);
++
+ 	return ret;
+ }
+ 
+@@ -735,6 +739,9 @@ static int vmbus_remove(struct device *child_device)
+ 			drv->remove(dev);
+ 	}
+ 
++	pr_info("remove type:%pUl instance:%pUl\n",
++		dev->dev_type.b, dev->dev_instance.b);
++
+ 	return 0;
+ }
+ 
+-- 
+2.16.0
+

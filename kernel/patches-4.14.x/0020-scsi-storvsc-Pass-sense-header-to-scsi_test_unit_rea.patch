@@ -1,0 +1,40 @@
+From 649568a258bea43a5ef668533665922cb96fcc57 Mon Sep 17 00:00:00 2001
+From: Rolf Neugebauer <rolf.neugebauer@docker.com>
+Date: Mon, 19 Mar 2018 15:42:16 +0000
+Subject: [PATCH 20/22] scsi: storvsc: Pass sense header to
+ scsi_test_unit_ready()
+
+Commit 74a78ebda4fa ("scsi: make the sense header argument to
+scsi_test_unit_ready mandatory") made the sense header argument
+to scsi_test_unit_ready() mandatory, but storvsc_host_scan() still
+passed NULL as an argument. Fix it.
+
+Signed-off-by: Rolf Neugebauer <rolf.neugebauer@docker.com>
+---
+ drivers/scsi/storvsc_drv.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/scsi/storvsc_drv.c b/drivers/scsi/storvsc_drv.c
+index a3e480e7a257..09547b382911 100644
+--- a/drivers/scsi/storvsc_drv.c
++++ b/drivers/scsi/storvsc_drv.c
+@@ -517,6 +517,7 @@ static void storvsc_host_scan(struct work_struct *work)
+ 	struct storvsc_scan_work *wrk;
+ 	struct Scsi_Host *host;
+ 	struct scsi_device *sdev;
++	struct scsi_sense_hdr sense_hdr;
+ 
+ 	wrk = container_of(work, struct storvsc_scan_work, work);
+ 	host = wrk->host;
+@@ -534,7 +535,7 @@ static void storvsc_host_scan(struct work_struct *work)
+ 	 */
+ 	mutex_lock(&host->scan_mutex);
+ 	shost_for_each_device(sdev, host)
+-		scsi_test_unit_ready(sdev, 1, 1, NULL);
++		scsi_test_unit_ready(sdev, 1, 1, &sense_hdr);
+ 	mutex_unlock(&host->scan_mutex);
+ 	/*
+ 	 * Now scan the host to discover LUNs that may have been added.
+-- 
+2.16.0
+
